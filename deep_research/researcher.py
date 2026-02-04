@@ -97,6 +97,36 @@ class DeepResearcher:
             system_prompt="You write comprehensive research reports.",
         )
 
+
+    def _fail_step(self, step: str, message: str) -> None:
+        """Raise a workflow error with step attribution."""
+        raise RuntimeError(f"DeepResearch step failed [{step}]: {message}")
+
+    def _validate_brief(self, brief: str) -> None:
+        if not isinstance(brief, str) or len(brief.strip()) < 50:
+            self._fail_step('brief', 'Brief was empty or too short to guide research.')
+
+    def _validate_topics(self, topics: list[ResearchTopic]) -> None:
+        if not topics:
+            self._fail_step('plan', 'Supervisor returned no research topics.')
+        # Ensure topics are distinct and non-trivial
+        normalized = [t.topic.strip().lower() for t in topics if isinstance(t.topic, str)]
+        if any(len(t.strip()) < 20 for t in normalized):
+            self._fail_step('plan', 'One or more topics were too short / underspecified.')
+        if len(set(normalized)) != len(normalized):
+            self._fail_step('plan', 'Supervisor returned duplicate topics.')
+
+    def _validate_findings(self, findings: list[ResearchFindings]) -> None:
+        if not findings:
+            self._fail_step('research', 'No findings were produced.')
+        for f in findings:
+            if not f.findings or len(f.findings.strip()) < 100:
+                self._fail_step('research', f"Findings for topic '{f.topic}' were empty or too short.")
+
+    def _validate_markdown(self, step: str, text: str) -> None:
+        if not isinstance(text, str) or len(text.strip()) < 50:
+            self._fail_step(step, 'Step produced empty output.')
+
     @logfire.instrument('Clarify query')
     async def clarify(self, query: str) -> tuple[bool, str]:
         """Check if clarification is needed.
@@ -198,26 +228,31 @@ class DeepResearcher:
         # Step 2: Create research brief
         status("Creating research brief...")
         brief = await self.create_brief(query)
+        self._validate_brief(brief)
         status(f"Brief: {brief[:100]}...")
 
         # Step 3: Plan research
         status("Planning research strategy...")
         topics = await self.plan_research(brief)
+        self._validate_topics(topics)
         status(f"Planned {len(topics)} research task(s)")
 
         # Step 4: Execute research in parallel
         status("Conducting research...")
         research_tasks = [self.research_topic(topic) for topic in topics]
         findings = await asyncio.gather(*research_tasks)
+        self._validate_findings(findings)
         status(f"Completed {len(findings)} research task(s)")
 
         # Step 5: Compress findings
         status("Organizing findings...")
         compressed = await self.compress_findings(findings)
+        self._validate_markdown('compress', compressed)
 
         # Step 6: Write final report
         status("Writing final report...")
         report = await self.write_report(query, brief, compressed)
+        self._validate_markdown('report', report)
 
         status("Research complete!")
         return report
