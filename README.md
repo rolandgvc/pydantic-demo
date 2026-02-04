@@ -51,6 +51,16 @@ uv run research -m openai:gpt-4o -p 5 "Your query"
 | `-o, --output` | Output file path | None |
 | `-i, --interactive` | Interactive mode | False |
 
+## Observability
+
+This project uses Logfire spans for each pipeline stage. If you set an Introspection token, the CLI will also export those spans to Introspection.
+
+Add to your `.env`:
+
+```
+INTROSPECTION_TOKEN=your-token-here
+```
+
 ## How It Works
 
 1. **Query Analysis** - Analyzes the input query
