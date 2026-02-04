@@ -14,12 +14,21 @@ load_dotenv(Path(__file__).parent.parent / '.env', override=True)
 import warnings
 warnings.filterwarnings('ignore', message='Logfire')
 
-# Configure logfire
+# Configure logfire (+ Introspection SDK dual export)
+_INTROSPECTION_PROCESSOR = None
 try:
     import logfire
-    logfire.configure(service_name='deep-research')
+    from introspection_sdk import IntrospectionSpanProcessor
+
+    _INTROSPECTION_PROCESSOR = IntrospectionSpanProcessor(service_name='deep-research')
+
+    logfire.configure(
+        service_name='deep-research',
+        additional_span_processors=[_INTROSPECTION_PROCESSOR],
+    )
     logfire.instrument_pydantic_ai()
 except Exception:
+    # Logfire and/or Introspection SDK are optional dependencies at runtime.
     pass
 
 from .researcher import DeepResearcher
@@ -129,10 +138,24 @@ Examples:
 
     args = parser.parse_args()
 
-    if args.interactive or not args.query:
-        asyncio.run(interactive_mode(args.model, args.parallel))
-    else:
-        asyncio.run(run_research(args.query, args.model, args.parallel, args.output))
+    try:
+        if args.interactive or not args.query:
+            asyncio.run(interactive_mode(args.model, args.parallel))
+        else:
+            asyncio.run(run_research(args.query, args.model, args.parallel, args.output))
+    finally:
+        # Best-effort flush for CLI usage.
+        try:
+            if _INTROSPECTION_PROCESSOR is not None:
+                _INTROSPECTION_PROCESSOR.force_flush()
+        except Exception:
+            pass
+        try:
+            import logfire
+
+            logfire.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':
