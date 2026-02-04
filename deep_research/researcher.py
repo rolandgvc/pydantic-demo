@@ -1,6 +1,10 @@
 """Deep research implementation using Pydantic AI."""
 import asyncio
 from dataclasses import dataclass
+import hashlib
+import json
+from pathlib import Path
+
 from typing import Any
 
 import logfire
@@ -175,6 +179,8 @@ class DeepResearcher:
         self,
         query: str,
         on_status: callable = None,
+        checkpoint_dir: str | Path | None = None,
+        resume: bool = False,
     ) -> str:
         """Conduct deep research on a query.
 
@@ -189,6 +195,47 @@ class DeepResearcher:
             if on_status:
                 on_status(msg)
 
+
+        run_dir: Path | None = None
+        if checkpoint_dir is not None:
+            run_hash = hashlib.sha256(f"{self.model}\n{query}".encode('utf-8')).hexdigest()[:12]
+            run_dir = Path(checkpoint_dir) / f"run-{run_hash}"
+            run_dir.mkdir(parents=True, exist_ok=True)
+
+        def _json_path(name: str) -> Path:
+            assert run_dir is not None
+            return run_dir / f"{name}.json"
+
+        def _text_path(name: str) -> Path:
+            assert run_dir is not None
+            return run_dir / f"{name}.md"
+
+        def _save_json(name: str, data: Any) -> None:
+            if run_dir is None:
+                return
+            _json_path(name).write_text(json.dumps(data, indent=2, ensure_ascii=False))
+
+        def _load_json(name: str) -> Any | None:
+            if run_dir is None:
+                return None
+            p = _json_path(name)
+            if resume and p.exists():
+                return json.loads(p.read_text())
+            return None
+
+        def _save_text(name: str, text: str) -> None:
+            if run_dir is None:
+                return
+            _text_path(name).write_text(text)
+
+        def _load_text(name: str) -> str | None:
+            if run_dir is None:
+                return None
+            p = _text_path(name)
+            if resume and p.exists():
+                return p.read_text()
+            return None
+
         # Step 1: Check for clarification (optional)
         status("Analyzing query...")
         needs_clarification, message = await self.clarify(query)
@@ -197,27 +244,55 @@ class DeepResearcher:
 
         # Step 2: Create research brief
         status("Creating research brief...")
-        brief = await self.create_brief(query)
+        brief_data = _load_json('brief')
+        if brief_data is not None:
+            brief = str(brief_data.get('brief', ''))
+            status("Loaded brief from checkpoint")
+        else:
+            brief = await self.create_brief(query)
+            _save_json('brief', {'brief': brief})
         status(f"Brief: {brief[:100]}...")
 
         # Step 3: Plan research
         status("Planning research strategy...")
-        topics = await self.plan_research(brief)
+        topics_data = _load_json('topics')
+        if topics_data is not None:
+            topics = [ResearchTopic.model_validate(t) for t in topics_data]
+            status("Loaded topics from checkpoint")
+        else:
+            topics = await self.plan_research(brief)
+            _save_json('topics', [t.model_dump() for t in topics])
         status(f"Planned {len(topics)} research task(s)")
 
         # Step 4: Execute research in parallel
         status("Conducting research...")
-        research_tasks = [self.research_topic(topic) for topic in topics]
-        findings = await asyncio.gather(*research_tasks)
+        findings_data = _load_json('findings')
+        if findings_data is not None:
+            findings = [ResearchFindings.model_validate(f) for f in findings_data]
+            status("Loaded findings from checkpoint")
+        else:
+            research_tasks = [self.research_topic(topic) for topic in topics]
+            findings = await asyncio.gather(*research_tasks)
+            _save_json('findings', [f.model_dump() for f in findings])
         status(f"Completed {len(findings)} research task(s)")
 
         # Step 5: Compress findings
         status("Organizing findings...")
-        compressed = await self.compress_findings(findings)
+        compressed = _load_text('compressed')
+        if compressed is not None:
+            status("Loaded compressed findings from checkpoint")
+        else:
+            compressed = await self.compress_findings(findings)
+            _save_text('compressed', compressed)
 
         # Step 6: Write final report
         status("Writing final report...")
-        report = await self.write_report(query, brief, compressed)
+        report = _load_text('report')
+        if report is not None:
+            status("Loaded final report from checkpoint")
+        else:
+            report = await self.write_report(query, brief, compressed)
+            _save_text('report', report)
 
         status("Research complete!")
         return report
