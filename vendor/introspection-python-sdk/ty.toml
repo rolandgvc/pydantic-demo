@@ -1,0 +1,9 @@
+# ty type checker configuration
+# Ignores unresolved imports for optional dependencies
+
+[rules]
+# Ignore unresolved imports - these are optional dependencies
+# - openai: only needed for openai-agents feature
+# - agents.tracing: optional dependency via openai-agents
+# - pydantic: only needed for tests
+unresolved-import = "ignore"

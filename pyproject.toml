@@ -7,6 +7,7 @@ dependencies = [
     "pydantic",
     "pydantic_ai_slim[openai,duckduckgo]",
     "logfire",
+    "introspection-sdk",
     "python-dotenv",
 ]
 
@@ -16,3 +17,9 @@ research = "deep_research.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv.sources]
+# NOTE: vendored to keep this repo self-contained for environments where the
+# introspection-sdk package is not available in the public package registry.
+introspection-sdk = { path = "vendor/introspection-python-sdk", editable = true }
+
