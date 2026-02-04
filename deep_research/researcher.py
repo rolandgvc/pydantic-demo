@@ -23,6 +23,14 @@ from .prompts import (
     SUPERVISOR_PROMPT,
     get_today,
 )
+from .errors import (
+    BriefGenerationError,
+    ClarificationError,
+    CompressionError,
+    PlanningError,
+    ReportWritingError,
+    ResearchTopicError,
+)
 
 
 @dataclass
@@ -191,33 +199,73 @@ class DeepResearcher:
 
         # Step 1: Check for clarification (optional)
         status("Analyzing query...")
-        needs_clarification, message = await self.clarify(query)
+        try:
+            needs_clarification, message = await self.clarify(query)
+        except Exception as e:  # pragma: no cover
+            raise ClarificationError(f"Clarification stage failed: {e}") from e
+
         if needs_clarification:
             return f"Clarification needed: {message}"
 
         # Step 2: Create research brief
         status("Creating research brief...")
-        brief = await self.create_brief(query)
+        try:
+            brief = await self.create_brief(query)
+        except Exception as e:
+            raise BriefGenerationError(f"Brief generation failed: {e}") from e
+
+        if not brief.strip():
+            raise BriefGenerationError("Brief generation returned empty output")
         status(f"Brief: {brief[:100]}...")
 
         # Step 3: Plan research
         status("Planning research strategy...")
-        topics = await self.plan_research(brief)
+        try:
+            topics = await self.plan_research(brief)
+        except Exception as e:
+            raise PlanningError(f"Planning failed: {e}") from e
+
+        if not topics:
+            raise PlanningError("Planning returned 0 topics")
         status(f"Planned {len(topics)} research task(s)")
 
         # Step 4: Execute research in parallel
         status("Conducting research...")
         research_tasks = [self.research_topic(topic) for topic in topics]
-        findings = await asyncio.gather(*research_tasks)
-        status(f"Completed {len(findings)} research task(s)")
+        results = await asyncio.gather(*research_tasks, return_exceptions=True)
+
+        findings: list[ResearchFindings] = []
+        errors: list[Exception] = []
+        for topic, result in zip(topics, results, strict=False):
+            if isinstance(result, Exception):
+                errors.append(result)
+                status(f"Research failed for topic '{topic.topic}': {result}")
+            else:
+                findings.append(result)
+
+        if not findings:
+            raise ResearchTopicError(f"All research topics failed ({len(errors)} error(s))")
+        status(f"Completed {len(findings)} research task(s) with {len(errors)} failure(s)")
 
         # Step 5: Compress findings
         status("Organizing findings...")
-        compressed = await self.compress_findings(findings)
+        try:
+            compressed = await self.compress_findings(findings)
+        except Exception as e:
+            raise CompressionError(f"Compression failed: {e}") from e
+
+        if not compressed.strip():
+            raise CompressionError("Compression returned empty output")
 
         # Step 6: Write final report
         status("Writing final report...")
-        report = await self.write_report(query, brief, compressed)
+        try:
+            report = await self.write_report(query, brief, compressed)
+        except Exception as e:
+            raise ReportWritingError(f"Report writing failed: {e}") from e
+
+        if not report.strip():
+            raise ReportWritingError("Report writing returned empty output")
 
         status("Research complete!")
         return report
