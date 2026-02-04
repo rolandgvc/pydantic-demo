@@ -1,6 +1,8 @@
 """Deep research implementation using Pydantic AI."""
 import asyncio
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import logfire
@@ -35,6 +37,21 @@ class ResearchContext:
     def __post_init__(self):
         if self.findings is None:
             self.findings = []
+
+
+
+
+def _ensure_dir(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _save_json(path: Path, data: Any) -> None:
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _load_json(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 class DeepResearcher:
@@ -175,19 +192,36 @@ class DeepResearcher:
         self,
         query: str,
         on_status: callable = None,
+        *,
+        checkpoint_dir: str | Path | None = None,
+        resume: bool = False,
     ) -> str:
         """Conduct deep research on a query.
 
         Args:
-            query: The research query
-            on_status: Optional callback for status updates
+            query: The research query.
+            on_status: Optional callback for status updates.
+            checkpoint_dir: If provided, intermediate artifacts are saved to this directory.
+            resume: If True, load any existing artifacts from `checkpoint_dir` and skip
+                completed stages.
 
         Returns:
-            Final research report as string
+            Final research report as string.
         """
+
         def status(msg: str):
             if on_status:
                 on_status(msg)
+
+        cp: Path | None = None
+        if checkpoint_dir is not None:
+            cp = _ensure_dir(Path(checkpoint_dir))
+
+        brief_path = cp / "brief.json" if cp else None
+        plan_path = cp / "plan.json" if cp else None
+        findings_path = cp / "findings.json" if cp else None
+        compressed_path = cp / "compressed.txt" if cp else None
+        report_path = cp / "report.md" if cp else None
 
         # Step 1: Check for clarification (optional)
         status("Analyzing query...")
@@ -196,28 +230,60 @@ class DeepResearcher:
             return f"Clarification needed: {message}"
 
         # Step 2: Create research brief
-        status("Creating research brief...")
-        brief = await self.create_brief(query)
+        if resume and brief_path and brief_path.exists():
+            status("Loading research brief from checkpoint...")
+            brief = _load_json(brief_path)["brief"]
+        else:
+            status("Creating research brief...")
+            brief = await self.create_brief(query)
+            if brief_path:
+                _save_json(brief_path, {"brief": brief})
         status(f"Brief: {brief[:100]}...")
 
         # Step 3: Plan research
-        status("Planning research strategy...")
-        topics = await self.plan_research(brief)
+        if resume and plan_path and plan_path.exists():
+            status("Loading research plan from checkpoint...")
+            raw = _load_json(plan_path)
+            topics = [ResearchTopic.model_validate(t) for t in raw["topics"]]
+        else:
+            status("Planning research strategy...")
+            topics = await self.plan_research(brief)
+            if plan_path:
+                _save_json(plan_path, {"topics": [t.model_dump() for t in topics]})
         status(f"Planned {len(topics)} research task(s)")
 
         # Step 4: Execute research in parallel
-        status("Conducting research...")
-        research_tasks = [self.research_topic(topic) for topic in topics]
-        findings = await asyncio.gather(*research_tasks)
+        if resume and findings_path and findings_path.exists():
+            status("Loading findings from checkpoint...")
+            raw = _load_json(findings_path)
+            findings = [ResearchFindings.model_validate(f) for f in raw["findings"]]
+        else:
+            status("Conducting research...")
+            research_tasks = [self.research_topic(topic) for topic in topics]
+            findings = await asyncio.gather(*research_tasks)
+            if findings_path:
+                _save_json(findings_path, {"findings": [f.model_dump() for f in findings]})
         status(f"Completed {len(findings)} research task(s)")
 
         # Step 5: Compress findings
-        status("Organizing findings...")
-        compressed = await self.compress_findings(findings)
+        if resume and compressed_path and compressed_path.exists():
+            status("Loading compressed findings from checkpoint...")
+            compressed = compressed_path.read_text(encoding="utf-8")
+        else:
+            status("Organizing findings...")
+            compressed = await self.compress_findings(findings)
+            if compressed_path:
+                compressed_path.write_text(compressed, encoding="utf-8")
 
         # Step 6: Write final report
-        status("Writing final report...")
-        report = await self.write_report(query, brief, compressed)
+        if resume and report_path and report_path.exists():
+            status("Loading final report from checkpoint...")
+            report = report_path.read_text(encoding="utf-8")
+        else:
+            status("Writing final report...")
+            report = await self.write_report(query, brief, compressed)
+            if report_path:
+                report_path.write_text(report, encoding="utf-8")
 
         status("Research complete!")
         return report
