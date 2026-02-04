@@ -14,6 +14,12 @@ from .models import (
     ResearchPlan,
     ResearchTopic,
 )
+from .validators import (
+    ValidationError,
+    require_min_links,
+    require_non_empty,
+    require_sources_section,
+)
 from .prompts import (
     CLARIFICATION_PROMPT,
     COMPRESS_PROMPT,
@@ -81,6 +87,7 @@ class DeepResearcher:
         # Researcher agent - does actual searching
         self.researcher = Agent(
             self.model,
+            output_type=ResearchFindings,
             tools=[duckduckgo_search_tool()],
             system_prompt="You are a research assistant who searches for information.",
         )
@@ -137,14 +144,18 @@ class DeepResearcher:
         prompt = RESEARCHER_PROMPT.format(topic=topic.topic, date=get_today())
         result = await self.researcher.run(prompt)
 
-        # Extract findings from conversation
-        findings = result.output if isinstance(result.output, str) else str(result.output)
+        # PydanticAI enforces output schema here.
+        findings: ResearchFindings = result.output
 
-        return ResearchFindings(
-            topic=topic.topic,
-            findings=findings,
-            sources=[]  # Sources are inline in the findings
-        )
+        # Step-level gate: ensure we have at least one source.
+        if not findings.sources:
+            raise ValidationError("research_topic", f"No sources returned for topic: {topic.topic!r}")
+
+        require_non_empty("research_topic", findings.findings)
+        # Require at least one markdown link overall; encourages [Title](URL) usage.
+        require_min_links("research_topic", findings.findings, min_links=1)
+
+        return findings
 
     @logfire.instrument('Compress findings')
     async def compress_findings(self, findings: list[ResearchFindings]) -> str:
@@ -156,7 +167,13 @@ class DeepResearcher:
 
         prompt = COMPRESS_PROMPT.format(findings=all_findings, date=get_today())
         result = await self.compressor.run(prompt)
-        return result.output if isinstance(result.output, str) else str(result.output)
+        compressed = result.output if isinstance(result.output, str) else str(result.output)
+
+        require_non_empty("compress_findings", compressed)
+        require_sources_section("compress_findings", compressed)
+        require_min_links("compress_findings", compressed, min_links=1)
+
+        return compressed
 
     @logfire.instrument('Write final report')
     async def write_report(self, query: str, brief: str, findings: str) -> str:
@@ -168,7 +185,13 @@ class DeepResearcher:
             date=get_today()
         )
         result = await self.report_writer.run(prompt)
-        return result.output if isinstance(result.output, str) else str(result.output)
+        report = result.output if isinstance(result.output, str) else str(result.output)
+
+        require_non_empty("write_report", report)
+        require_sources_section("write_report", report)
+        require_min_links("write_report", report, min_links=1)
+
+        return report
 
     @logfire.instrument('Deep research: {query}')
     async def research(

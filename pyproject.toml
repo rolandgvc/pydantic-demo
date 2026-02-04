@@ -10,6 +10,12 @@ dependencies = [
     "python-dotenv",
 ]
 
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
 [project.scripts]
 research = "deep_research.cli:main"
 
