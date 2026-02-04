@@ -13,7 +13,7 @@ class ResearchFindings(BaseModel):
     """Findings from a research task."""
     topic: str
     findings: str
-    sources: list[str] = []
+    sources: list[str] = Field(default_factory=list)
 
 
 class ResearchPlan(BaseModel):

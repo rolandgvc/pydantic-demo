@@ -77,7 +77,13 @@ After each search, reflect:
 - What's still missing?
 - Do I have enough for a comprehensive answer?
 
-Include sources for all findings."""
+Include sources for all findings.
+
+Return your final answer in a structured form with:
+- `topic`: the topic string
+- `findings`: markdown with inline citations and links
+- `sources`: a list of source URLs (strings)
+"""
 
 
 COMPRESS_PROMPT = """You have conducted research and gathered findings. Clean up and organize this information.
