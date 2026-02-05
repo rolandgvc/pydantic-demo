@@ -133,17 +133,43 @@ class DeepResearcher:
 
     @logfire.instrument('Research topic: {topic.topic}')
     async def research_topic(self, topic: ResearchTopic) -> ResearchFindings:
-        """Research a single topic."""
-        prompt = RESEARCHER_PROMPT.format(topic=topic.topic, date=get_today())
-        result = await self.researcher.run(prompt)
+        """Research a single topic.
 
-        # Extract findings from conversation
-        findings = result.output if isinstance(result.output, str) else str(result.output)
+        Success criteria (best-effort):
+        - non-trivial content length
+        - at least one source URL included in the findings text
 
-        return ResearchFindings(
-            topic=topic.topic,
-            findings=findings,
-            sources=[]  # Sources are inline in the findings
+        Retries are bounded by `max_search_iterations`.
+        """
+
+        base_prompt = RESEARCHER_PROMPT.format(topic=topic.topic, date=get_today())
+
+        last_findings = ''
+        for attempt in range(1, self.max_search_iterations + 1):
+            prompt = base_prompt
+            if attempt > 1:
+                prompt += (
+                    "\n\nThe previous attempt was insufficient. "
+                    "Please improve coverage and MUST include multiple source URLs (https://...) in the text."
+                )
+
+            result = await self.researcher.run(prompt)
+            findings = result.output if isinstance(result.output, str) else str(result.output)
+            findings = (findings or '').strip()
+            last_findings = findings
+
+            # Heuristic: require some substance + at least one URL
+            has_url = 'http://' in findings or 'https://' in findings
+            if len(findings) >= 400 and has_url:
+                return ResearchFindings(
+                    topic=topic.topic,
+                    findings=findings,
+                    sources=[],  # Sources are inline in the findings
+                )
+
+        raise RuntimeError(
+            f"Failed to produce adequate research findings for topic after {self.max_search_iterations} attempt(s): {topic.topic!r}. "
+            f"Last output length={len(last_findings)}"
         )
 
     @logfire.instrument('Compress findings')
