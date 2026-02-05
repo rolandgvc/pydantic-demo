@@ -66,18 +66,18 @@ Topic to research:
 
 Today's date is {date}.
 
-Your job is to gather comprehensive information using web search. Follow these steps:
+Your job is to gather comprehensive information using web search.
 
-1. **Start broad** - Use comprehensive search queries first
-2. **Refine** - Fill gaps with targeted follow-up searches
-3. **Stop when sufficient** - Don't over-search; 3-5 searches usually enough
+Guidelines:
+1. Start broad with a comprehensive query
+2. Refine with targeted follow-up searches
+3. Stop when sufficient; 3–5 searches is usually enough
 
-After each search, reflect:
-- What key information did I find?
-- What's still missing?
-- Do I have enough for a comprehensive answer?
-
-Include sources for all findings."""
+Requirements:
+- Your findings MUST be written in Markdown.
+- Use inline citation markers like [1], [2] for any non-trivial factual claim.
+- Provide a `sources` list containing the distinct URLs you used (these should correspond to the inline citations).
+"""
 
 
 COMPRESS_PROMPT = """You have conducted research and gathered findings. Clean up and organize this information.
@@ -91,10 +91,13 @@ Create a clean, comprehensive summary that:
 1. Preserves ALL relevant information (don't summarize away details)
 2. Removes duplicates and irrelevant content
 3. Organizes findings logically
-4. Includes inline citations [1], [2], etc.
-5. Lists all sources at the end
 
-The output should be comprehensive - a later step will use this to write the final report."""
+Requirements:
+- The summary MUST be written in Markdown.
+- Keep/introduce inline citations like [1], [2], etc.
+- Provide a `sources` list containing the distinct URLs referenced.
+
+The output should be comprehensive; a later step will use this to write the final report."""
 
 
 FINAL_REPORT_PROMPT = """Based on all research findings, create a comprehensive report.

@@ -1,7 +1,5 @@
 """Data models for deep research."""
-from typing import Annotated
-from pydantic import BaseModel, Field
-from annotated_types import Ge, Le
+from pydantic import BaseModel, Field, HttpUrl
 
 
 class ResearchTopic(BaseModel):
@@ -11,19 +9,41 @@ class ResearchTopic(BaseModel):
 
 class ResearchFindings(BaseModel):
     """Findings from a research task."""
+
     topic: str
-    findings: str
-    sources: list[str] = []
+    findings: str = Field(description="Markdown findings for this topic")
+    sources: list[HttpUrl] = Field(default_factory=list, description="Source URLs used")
 
 
 class ResearchPlan(BaseModel):
     """Plan for conducting research."""
+
     topics: list[ResearchTopic] = Field(
         description="List of research topics to investigate in parallel",
         min_length=1,
-        max_length=5
+        max_length=5,
     )
     reasoning: str = Field(description="Explanation of why these topics were chosen")
+
+
+class ResearcherOutput(BaseModel):
+    """Structured output produced by a researcher agent."""
+
+    findings: str = Field(description="Markdown findings with inline citation markers like [1], [2]")
+    sources: list[HttpUrl] = Field(
+        default_factory=list,
+        description="List of distinct source URLs referenced by the findings",
+    )
+
+
+class CompressedFindings(BaseModel):
+    """Structured output produced by the compressor agent."""
+
+    summary: str = Field(description="Cleaned, deduplicated markdown summary with inline citations")
+    sources: list[HttpUrl] = Field(
+        default_factory=list,
+        description="List of distinct source URLs referenced by the summary",
+    )
 
 
 class ResearchComplete(BaseModel):

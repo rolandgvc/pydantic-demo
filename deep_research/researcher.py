@@ -9,10 +9,12 @@ from pydantic_ai.common_tools.duckduckgo import duckduckgo_search_tool
 
 from .models import (
     ClarificationNeeded,
+    CompressedFindings,
     ResearchBrief,
     ResearchFindings,
     ResearchPlan,
     ResearchTopic,
+    ResearcherOutput,
 )
 from .prompts import (
     CLARIFICATION_PROMPT,
@@ -81,6 +83,7 @@ class DeepResearcher:
         # Researcher agent - does actual searching
         self.researcher = Agent(
             self.model,
+            output_type=ResearcherOutput,
             tools=[duckduckgo_search_tool()],
             system_prompt="You are a research assistant who searches for information.",
         )
@@ -88,6 +91,7 @@ class DeepResearcher:
         # Compressor agent - summarizes findings
         self.compressor = Agent(
             self.model,
+            output_type=CompressedFindings,
             system_prompt="You compress and organize research findings.",
         )
 
@@ -137,13 +141,10 @@ class DeepResearcher:
         prompt = RESEARCHER_PROMPT.format(topic=topic.topic, date=get_today())
         result = await self.researcher.run(prompt)
 
-        # Extract findings from conversation
-        findings = result.output if isinstance(result.output, str) else str(result.output)
-
         return ResearchFindings(
             topic=topic.topic,
-            findings=findings,
-            sources=[]  # Sources are inline in the findings
+            findings=result.output.findings,
+            sources=result.output.sources,
         )
 
     @logfire.instrument('Compress findings')
@@ -156,7 +157,7 @@ class DeepResearcher:
 
         prompt = COMPRESS_PROMPT.format(findings=all_findings, date=get_today())
         result = await self.compressor.run(prompt)
-        return result.output if isinstance(result.output, str) else str(result.output)
+        return result.output.summary
 
     @logfire.instrument('Write final report')
     async def write_report(self, query: str, brief: str, findings: str) -> str:
