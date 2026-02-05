@@ -4,7 +4,9 @@ import asyncio
 import argparse
 import sys
 import os
+import uuid
 from pathlib import Path
+from contextlib import ExitStack
 
 # Load environment before other imports
 from dotenv import load_dotenv
@@ -14,10 +16,28 @@ load_dotenv(Path(__file__).parent.parent / '.env', override=True)
 import warnings
 warnings.filterwarnings('ignore', message='Logfire')
 
-# Configure logfire
+# Configure logfire (+ Introspection export)
+#
+# Introspection SDK is optional at runtime (e.g., for contributors running the demo without credentials),
+# but when installed it will export Logfire spans to Introspection.
+_intro_client = None
 try:
     import logfire
-    logfire.configure(service_name='deep-research')
+
+    try:
+        from introspection_sdk import IntrospectionClient, IntrospectionSpanProcessor
+
+        introspection_processor = IntrospectionSpanProcessor(service_name='deep-research')
+        _intro_client = IntrospectionClient(service_name='deep-research')
+
+        logfire.configure(
+            service_name='deep-research',
+            additional_span_processors=[introspection_processor],
+        )
+    except Exception:
+        # Fall back to plain Logfire if Introspection SDK isn't available.
+        logfire.configure(service_name='deep-research')
+
     logfire.instrument_pydantic_ai()
 except Exception:
     pass
@@ -43,7 +63,18 @@ async def run_research(query: str, model: str, parallel: int, output_file: str =
     print(f"{'='*60}")
     print(f"\nQuery: {query}\n")
 
-    report = await researcher.research(query, on_status=print_status)
+    # Group spans for this run under a stable conversation id.
+    # Users can optionally provide INTROSPECTION_CONVERSATION_ID/INTROSPECTION_USER_ID.
+    conversation_id = os.getenv('INTROSPECTION_CONVERSATION_ID') or str(uuid.uuid4())
+    user_id = os.getenv('INTROSPECTION_USER_ID')
+
+    with ExitStack() as stack:
+        if _intro_client is not None:
+            if user_id:
+                stack.enter_context(_intro_client.set_user_id(user_id))
+            stack.enter_context(_intro_client.set_conversation(conversation_id))
+
+        report = await researcher.research(query, on_status=print_status)
 
     print(f"\n{'='*60}")
     print(f"  REPORT")
