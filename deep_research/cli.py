@@ -14,10 +14,28 @@ load_dotenv(Path(__file__).parent.parent / '.env', override=True)
 import warnings
 warnings.filterwarnings('ignore', message='Logfire')
 
-# Configure logfire
+# Configure logfire (+ Introspection SDK export when available)
 try:
     import logfire
-    logfire.configure(service_name='deep-research')
+
+    additional_span_processors = []
+    try:
+        from introspection_sdk import IntrospectionSpanProcessor
+
+        additional_span_processors.append(
+            IntrospectionSpanProcessor(service_name='deep-research')
+        )
+    except Exception:
+        # Introspection SDK is optional at runtime; keep CLI usable without it.
+        pass
+
+    if additional_span_processors:
+        logfire.configure(
+            service_name='deep-research',
+            additional_span_processors=additional_span_processors,
+        )
+    else:
+        logfire.configure(service_name='deep-research')
     logfire.instrument_pydantic_ai()
 except Exception:
     pass

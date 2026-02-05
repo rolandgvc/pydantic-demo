@@ -8,6 +8,7 @@ dependencies = [
     "pydantic_ai_slim[openai,duckduckgo]",
     "logfire",
     "python-dotenv",
+    "introspection-sdk",
 ]
 
 [project.scripts]
