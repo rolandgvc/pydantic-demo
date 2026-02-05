@@ -198,26 +198,48 @@ class DeepResearcher:
         # Step 2: Create research brief
         status("Creating research brief...")
         brief = await self.create_brief(query)
+        if not brief or not brief.strip():
+            return "Error: failed to create a research brief. Please rephrase your question and try again."
         status(f"Brief: {brief[:100]}...")
 
         # Step 3: Plan research
         status("Planning research strategy...")
         topics = await self.plan_research(brief)
+        if not topics:
+            return "Error: research planner produced no topics. Please try a more specific query."
         status(f"Planned {len(topics)} research task(s)")
 
         # Step 4: Execute research in parallel
         status("Conducting research...")
         research_tasks = [self.research_topic(topic) for topic in topics]
-        findings = await asyncio.gather(*research_tasks)
+        results = await asyncio.gather(*research_tasks, return_exceptions=True)
+
+        findings: list[ResearchFindings] = []
+        failures: list[str] = []
+        for topic, res in zip(topics, results, strict=False):
+            if isinstance(res, Exception):
+                failures.append(f"{topic.topic[:60]}...: {type(res).__name__}: {res}")
+                continue
+            findings.append(res)
+
+        if failures:
+            status(f"Warning: {len(failures)} research task(s) failed")
+        if not findings:
+            return "Error: research failed for all planned topics. Please try again later."
+
         status(f"Completed {len(findings)} research task(s)")
 
         # Step 5: Compress findings
         status("Organizing findings...")
         compressed = await self.compress_findings(findings)
+        if not compressed or not compressed.strip():
+            return "Error: failed to organize findings into a summary. Please try again."
 
         # Step 6: Write final report
         status("Writing final report...")
         report = await self.write_report(query, brief, compressed)
+        if not report or not report.strip():
+            return "Error: failed to generate final report. Please try again."
 
         status("Research complete!")
         return report
