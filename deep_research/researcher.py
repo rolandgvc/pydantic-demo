@@ -1,6 +1,9 @@
 """Deep research implementation using Pydantic AI."""
+
 import asyncio
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import logfire
@@ -175,6 +178,8 @@ class DeepResearcher:
         self,
         query: str,
         on_status: callable = None,
+        workdir: str | Path | None = None,
+        resume: bool = False,
     ) -> str:
         """Conduct deep research on a query.
 
@@ -189,6 +194,26 @@ class DeepResearcher:
             if on_status:
                 on_status(msg)
 
+        run_dir: Path | None = None
+        if workdir is not None:
+            run_dir = Path(workdir)
+            run_dir.mkdir(parents=True, exist_ok=True)
+
+        def checkpoint_path(name: str) -> Path | None:
+            if run_dir is None:
+                return None
+            return run_dir / name
+
+        def maybe_load_text(path: Path | None) -> str | None:
+            if not resume or path is None or not path.exists():
+                return None
+            return path.read_text(encoding='utf-8')
+
+        def save_text(path: Path | None, text: str) -> None:
+            if path is None:
+                return
+            path.write_text(text, encoding='utf-8')
+
         # Step 1: Check for clarification (optional)
         status("Analyzing query...")
         needs_clarification, message = await self.clarify(query)
@@ -197,27 +222,67 @@ class DeepResearcher:
 
         # Step 2: Create research brief
         status("Creating research brief...")
-        brief = await self.create_brief(query)
+        brief_path = checkpoint_path('brief.md')
+        brief = maybe_load_text(brief_path)
+        if brief is None:
+            brief = await self.create_brief(query)
+            save_text(brief_path, brief)
         status(f"Brief: {brief[:100]}...")
 
         # Step 3: Plan research
         status("Planning research strategy...")
-        topics = await self.plan_research(brief)
+        plan_path = checkpoint_path('plan.json')
+        topics: list[ResearchTopic] | None = None
+        if resume and plan_path is not None and plan_path.exists():
+            plan_data = json.loads(plan_path.read_text(encoding='utf-8'))
+            topics = [ResearchTopic.model_validate(t) for t in plan_data.get('topics', [])]
+        if topics is None:
+            topics = await self.plan_research(brief)
+            if plan_path is not None:
+                plan_path.write_text(
+                    json.dumps({'topics': [t.model_dump() for t in topics]}, indent=2),
+                    encoding='utf-8',
+                )
         status(f"Planned {len(topics)} research task(s)")
 
         # Step 4: Execute research in parallel
         status("Conducting research...")
-        research_tasks = [self.research_topic(topic) for topic in topics]
-        findings = await asyncio.gather(*research_tasks)
+        findings: list[ResearchFindings] = []
+
+        pending: list[tuple[int, ResearchTopic]] = []
+        for i, topic in enumerate(topics):
+            finding_path = checkpoint_path(f'finding_{i+1}.md')
+            cached = maybe_load_text(finding_path)
+            if cached is not None:
+                findings.append(ResearchFindings(topic=topic.topic, findings=cached, sources=[]))
+            else:
+                pending.append((i, topic))
+
+        if pending:
+            tasks = [self.research_topic(topic) for _, topic in pending]
+            results = await asyncio.gather(*tasks)
+            for (i, topic), finding in zip(pending, results, strict=True):
+                findings.append(finding)
+                finding_path = checkpoint_path(f'finding_{i+1}.md')
+                save_text(finding_path, finding.findings)
+
         status(f"Completed {len(findings)} research task(s)")
 
         # Step 5: Compress findings
         status("Organizing findings...")
-        compressed = await self.compress_findings(findings)
+        compressed_path = checkpoint_path('compressed.md')
+        compressed = maybe_load_text(compressed_path)
+        if compressed is None:
+            compressed = await self.compress_findings(findings)
+            save_text(compressed_path, compressed)
 
         # Step 6: Write final report
         status("Writing final report...")
-        report = await self.write_report(query, brief, compressed)
+        report_path = checkpoint_path('report.md')
+        report = maybe_load_text(report_path)
+        if report is None:
+            report = await self.write_report(query, brief, compressed)
+            save_text(report_path, report)
 
         status("Research complete!")
         return report

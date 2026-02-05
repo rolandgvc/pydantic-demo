@@ -30,8 +30,17 @@ def print_status(msg: str):
     print(f"\033[90m→ {msg}\033[0m", file=sys.stderr)
 
 
-async def run_research(query: str, model: str, parallel: int, output_file: str = None):
+async def run_research(
+    query: str,
+    model: str,
+    parallel: int,
+    output_file: str = None,
+    workdir: str | None = None,
+    resume: bool = False,
+):
+
     """Run deep research."""
+
     researcher = DeepResearcher(
         model=model,
         max_parallel_researchers=parallel,
@@ -43,7 +52,12 @@ async def run_research(query: str, model: str, parallel: int, output_file: str =
     print(f"{'='*60}")
     print(f"\nQuery: {query}\n")
 
-    report = await researcher.research(query, on_status=print_status)
+    report = await researcher.research(
+        query,
+        on_status=print_status,
+        workdir=workdir,
+        resume=resume,
+    )
 
     print(f"\n{'='*60}")
     print(f"  REPORT")
@@ -126,13 +140,31 @@ Examples:
         action='store_true',
         help='Run in interactive mode'
     )
+    parser.add_argument(
+        '--workdir',
+        help='Directory to store run artifacts (brief/plan/findings/report) for resuming'
+    )
+    parser.add_argument(
+        '--resume',
+        action='store_true',
+        help='Resume from artifacts in --workdir when present'
+    )
 
     args = parser.parse_args()
 
     if args.interactive or not args.query:
         asyncio.run(interactive_mode(args.model, args.parallel))
     else:
-        asyncio.run(run_research(args.query, args.model, args.parallel, args.output))
+        asyncio.run(
+            run_research(
+                args.query,
+                args.model,
+                args.parallel,
+                args.output,
+                workdir=args.workdir,
+                resume=args.resume,
+            )
+        )
 
 
 if __name__ == '__main__':
