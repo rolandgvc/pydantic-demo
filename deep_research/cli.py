@@ -4,6 +4,7 @@ import asyncio
 import argparse
 import sys
 import os
+import uuid
 from pathlib import Path
 
 # Load environment before other imports
@@ -17,10 +18,24 @@ warnings.filterwarnings('ignore', message='Logfire')
 # Configure logfire
 try:
     import logfire
-    logfire.configure(service_name='deep-research')
+
+    # Introspection SDK export (via Logfire span processor)
+    try:
+        from introspection_sdk import IntrospectionClient, IntrospectionSpanProcessor
+
+        _introspection_processor = IntrospectionSpanProcessor(service_name='deep-research')
+        _introspection_client = IntrospectionClient(service_name='deep-research')
+    except Exception:
+        _introspection_processor = None
+        _introspection_client = None
+
+    logfire.configure(
+        service_name='deep-research',
+        additional_span_processors=[p for p in [_introspection_processor] if p is not None],
+    )
     logfire.instrument_pydantic_ai()
 except Exception:
-    pass
+    _introspection_client = None
 
 from .researcher import DeepResearcher
 
@@ -43,7 +58,13 @@ async def run_research(query: str, model: str, parallel: int, output_file: str =
     print(f"{'='*60}")
     print(f"\nQuery: {query}\n")
 
-    report = await researcher.research(query, on_status=print_status)
+    conversation_id = os.environ.get('DEEP_RESEARCH_CONVERSATION_ID') or str(uuid.uuid4())
+
+    if _introspection_client is None:
+        report = await researcher.research(query, on_status=print_status)
+    else:
+        with _introspection_client.set_conversation(conversation_id):
+            report = await researcher.research(query, on_status=print_status)
 
     print(f"\n{'='*60}")
     print(f"  REPORT")
