@@ -1,6 +1,8 @@
 """Deep research implementation using Pydantic AI."""
 import asyncio
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import logfire
@@ -175,6 +177,7 @@ class DeepResearcher:
         self,
         query: str,
         on_status: callable = None,
+        checkpoint_dir: str | Path | None = None,
     ) -> str:
         """Conduct deep research on a query.
 
@@ -189,6 +192,22 @@ class DeepResearcher:
             if on_status:
                 on_status(msg)
 
+
+        ckpt_dir: Path | None = None
+        if checkpoint_dir is not None:
+            ckpt_dir = Path(checkpoint_dir)
+            ckpt_dir.mkdir(parents=True, exist_ok=True)
+
+            meta_path = ckpt_dir / "meta.json"
+            if not meta_path.exists():
+                meta_path.write_text(
+                    json.dumps({"query": query, "model": self.model, "date": get_today()}, indent=2)
+                )
+
+            report_path = ckpt_dir / "report.md"
+            if report_path.exists():
+                status("Loading final report from checkpoint...")
+                return report_path.read_text()
         # Step 1: Check for clarification (optional)
         status("Analyzing query...")
         needs_clarification, message = await self.clarify(query)
@@ -196,28 +215,60 @@ class DeepResearcher:
             return f"Clarification needed: {message}"
 
         # Step 2: Create research brief
-        status("Creating research brief...")
-        brief = await self.create_brief(query)
+        brief_path = (ckpt_dir / "brief.txt") if ckpt_dir else None
+        if brief_path and brief_path.exists():
+            status("Loading research brief from checkpoint...")
+            brief = brief_path.read_text()
+        else:
+            status("Creating research brief...")
+            brief = await self.create_brief(query)
+            if brief_path:
+                brief_path.write_text(brief)
         status(f"Brief: {brief[:100]}...")
 
         # Step 3: Plan research
-        status("Planning research strategy...")
-        topics = await self.plan_research(brief)
+        plan_path = (ckpt_dir / "plan.json") if ckpt_dir else None
+        if plan_path and plan_path.exists():
+            status("Loading research plan from checkpoint...")
+            topics_data = json.loads(plan_path.read_text())
+            topics = [ResearchTopic.model_validate(t) for t in topics_data]
+        else:
+            status("Planning research strategy...")
+            topics = await self.plan_research(brief)
+            if plan_path:
+                plan_path.write_text(json.dumps([t.model_dump() for t in topics], indent=2))
         status(f"Planned {len(topics)} research task(s)")
 
         # Step 4: Execute research in parallel
-        status("Conducting research...")
-        research_tasks = [self.research_topic(topic) for topic in topics]
-        findings = await asyncio.gather(*research_tasks)
+        findings_path = (ckpt_dir / "findings.json") if ckpt_dir else None
+        if findings_path and findings_path.exists():
+            status("Loading research findings from checkpoint...")
+            findings_data = json.loads(findings_path.read_text())
+            findings = [ResearchFindings.model_validate(f) for f in findings_data]
+        else:
+            status("Conducting research...")
+            research_tasks = [self.research_topic(topic) for topic in topics]
+            findings = await asyncio.gather(*research_tasks)
+            if findings_path:
+                findings_path.write_text(json.dumps([f.model_dump() for f in findings], indent=2))
         status(f"Completed {len(findings)} research task(s)")
 
         # Step 5: Compress findings
-        status("Organizing findings...")
-        compressed = await self.compress_findings(findings)
+        compressed_path = (ckpt_dir / "compressed.md") if ckpt_dir else None
+        if compressed_path and compressed_path.exists():
+            status("Loading compressed findings from checkpoint...")
+            compressed = compressed_path.read_text()
+        else:
+            status("Organizing findings...")
+            compressed = await self.compress_findings(findings)
+            if compressed_path:
+                compressed_path.write_text(compressed)
 
         # Step 6: Write final report
         status("Writing final report...")
         report = await self.write_report(query, brief, compressed)
+        if ckpt_dir:
+            (ckpt_dir / "report.md").write_text(report)
 
         status("Research complete!")
         return report
