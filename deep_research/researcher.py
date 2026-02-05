@@ -43,11 +43,13 @@ class DeepResearcher:
     def __init__(
         self,
         model: str = "openai:gpt-4o",
+        fast_model: str | None = "openai:gpt-4o-mini",
         max_parallel_researchers: int = 3,
         max_search_iterations: int = 5,
         allow_clarification: bool = False,
     ):
         self.model = model
+        self.fast_model = fast_model
         self.max_parallel_researchers = max_parallel_researchers
         self.max_search_iterations = max_search_iterations
         self.allow_clarification = allow_clarification
@@ -57,23 +59,24 @@ class DeepResearcher:
 
     def _init_agents(self):
         """Initialize all agents."""
+        planning_model = self.fast_model or self.model
         # Clarification agent
         self.clarifier = Agent(
-            self.model,
+            planning_model,
             output_type=ClarificationNeeded,
             system_prompt="You help clarify research requests when needed.",
         )
 
         # Brief writer agent
         self.brief_writer = Agent(
-            self.model,
+            planning_model,
             output_type=ResearchBrief,
             system_prompt="You transform user queries into detailed research briefs.",
         )
 
         # Supervisor agent - plans research
         self.supervisor = Agent(
-            self.model,
+            planning_model,
             output_type=ResearchPlan,
             system_prompt="You are a research supervisor who plans research strategies.",
         )
@@ -87,7 +90,7 @@ class DeepResearcher:
 
         # Compressor agent - summarizes findings
         self.compressor = Agent(
-            self.model,
+            planning_model,
             system_prompt="You compress and organize research findings.",
         )
 

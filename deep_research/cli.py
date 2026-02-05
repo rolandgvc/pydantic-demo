@@ -30,10 +30,18 @@ def print_status(msg: str):
     print(f"\033[90m→ {msg}\033[0m", file=sys.stderr)
 
 
-async def run_research(query: str, model: str, parallel: int, output_file: str = None):
+async def run_research(
+    query: str,
+    model: str,
+    fast_model: str | None,
+    parallel: int,
+    output_file: str = None,
+):
+
     """Run deep research."""
     researcher = DeepResearcher(
         model=model,
+        fast_model=fast_model,
         max_parallel_researchers=parallel,
         allow_clarification=False,
     )
@@ -58,12 +66,13 @@ async def run_research(query: str, model: str, parallel: int, output_file: str =
     return report
 
 
-async def interactive_mode(model: str, parallel: int):
+async def interactive_mode(model: str, fast_model: str | None, parallel: int):
     """Run in interactive mode."""
     print(f"\n{'='*60}")
     print(f"  Deep Research - Interactive Mode")
     print(f"{'='*60}")
     print(f"\nModel: {model}")
+    print(f"Fast model: {fast_model}")
     print(f"Max parallel researchers: {parallel}")
     print("\nEnter your research query (or 'quit' to exit):\n")
 
@@ -78,7 +87,7 @@ async def interactive_mode(model: str, parallel: int):
                 print("Please enter a query.\n")
                 continue
 
-            await run_research(query, model, parallel)
+            await run_research(query, model, fast_model, parallel)
             print()
 
         except KeyboardInterrupt:
@@ -109,7 +118,12 @@ Examples:
     parser.add_argument(
         '-m', '--model',
         default='openai:gpt-4o',
-        help='Model to use (default: openai:gpt-4o)'
+        help='Model to use for research + report writing (default: openai:gpt-4o)'
+    )
+    parser.add_argument(
+        '--fast-model',
+        default='openai:gpt-4o-mini',
+        help='Model to use for brief/planning/compression steps (default: openai:gpt-4o-mini)'
     )
     parser.add_argument(
         '-p', '--parallel',
@@ -130,9 +144,9 @@ Examples:
     args = parser.parse_args()
 
     if args.interactive or not args.query:
-        asyncio.run(interactive_mode(args.model, args.parallel))
+        asyncio.run(interactive_mode(args.model, args.fast_model, args.parallel))
     else:
-        asyncio.run(run_research(args.query, args.model, args.parallel, args.output))
+        asyncio.run(run_research(args.query, args.model, args.fast_model, args.parallel, args.output))
 
 
 if __name__ == '__main__':
