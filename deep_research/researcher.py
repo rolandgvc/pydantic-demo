@@ -3,7 +3,18 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-import logfire
+try:
+    import logfire  # type: ignore
+except ImportError:  # pragma: no cover
+    class _NoOpLogfire:
+        def instrument(self, *_args, **_kwargs):
+            def _decorator(fn):
+                return fn
+
+            return _decorator
+
+    logfire = _NoOpLogfire()  # type: ignore
+
 from pydantic_ai import Agent
 from pydantic_ai.common_tools.duckduckgo import duckduckgo_search_tool
 
