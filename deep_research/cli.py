@@ -30,7 +30,13 @@ def print_status(msg: str):
     print(f"\033[90m→ {msg}\033[0m", file=sys.stderr)
 
 
-async def run_research(query: str, model: str, parallel: int, output_file: str = None):
+async def run_research(
+    query: str,
+    model: str,
+    parallel: int,
+    output_file: str = None,
+    checkpoint_dir: str | None = None,
+):
     """Run deep research."""
     researcher = DeepResearcher(
         model=model,
@@ -43,7 +49,7 @@ async def run_research(query: str, model: str, parallel: int, output_file: str =
     print(f"{'='*60}")
     print(f"\nQuery: {query}\n")
 
-    report = await researcher.research(query, on_status=print_status)
+    report = await researcher.research(query, on_status=print_status, checkpoint_dir=checkpoint_dir)
 
     print(f"\n{'='*60}")
     print(f"  REPORT")
@@ -122,6 +128,10 @@ Examples:
         help='Output file for report (markdown)'
     )
     parser.add_argument(
+        '--checkpoint-dir',
+        help='Directory to save intermediate checkpoints (enables resumable runs)'
+    )
+    parser.add_argument(
         '-i', '--interactive',
         action='store_true',
         help='Run in interactive mode'
@@ -132,7 +142,7 @@ Examples:
     if args.interactive or not args.query:
         asyncio.run(interactive_mode(args.model, args.parallel))
     else:
-        asyncio.run(run_research(args.query, args.model, args.parallel, args.output))
+        asyncio.run(run_research(args.query, args.model, args.parallel, args.output, checkpoint_dir=args.checkpoint_dir))
 
 
 if __name__ == '__main__':
