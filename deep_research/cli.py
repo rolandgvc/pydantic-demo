@@ -17,7 +17,14 @@ warnings.filterwarnings('ignore', message='Logfire')
 # Configure logfire
 try:
     import logfire
-    logfire.configure(service_name='deep-research')
+    from introspection_sdk import IntrospectionSpanProcessor
+
+    introspection_processor = IntrospectionSpanProcessor(service_name='deep-research')
+
+    logfire.configure(
+        service_name='deep-research',
+        additional_span_processors=[introspection_processor],
+    )
     logfire.instrument_pydantic_ai()
 except Exception:
     pass
