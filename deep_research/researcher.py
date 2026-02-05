@@ -1,6 +1,8 @@
 """Deep research implementation using Pydantic AI."""
 import asyncio
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import logfire
@@ -97,6 +99,21 @@ class DeepResearcher:
             system_prompt="You write comprehensive research reports.",
         )
 
+    def _checkpoint_path(self, checkpoint_dir: Path, name: str) -> Path:
+        return checkpoint_dir / f"{name}.json"
+
+    def _load_checkpoint(self, checkpoint_dir: Path, name: str) -> Any | None:
+        path = self._checkpoint_path(checkpoint_dir, name)
+        if not path.exists():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def _save_checkpoint(self, checkpoint_dir: Path, name: str, data: Any) -> None:
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        path = self._checkpoint_path(checkpoint_dir, name)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
     @logfire.instrument('Clarify query')
     async def clarify(self, query: str) -> tuple[bool, str]:
         """Check if clarification is needed.
@@ -175,6 +192,8 @@ class DeepResearcher:
         self,
         query: str,
         on_status: callable = None,
+        checkpoint_dir: str | Path | None = None,
+        resume: bool = False,
     ) -> str:
         """Conduct deep research on a query.
 
@@ -189,6 +208,18 @@ class DeepResearcher:
             if on_status:
                 on_status(msg)
 
+        checkpoint_path: Path | None = Path(checkpoint_dir) if checkpoint_dir else None
+        if resume and checkpoint_path is None:
+            raise ValueError("resume=True requires checkpoint_dir")
+
+        if checkpoint_path is not None:
+            # Save minimal run metadata for debugging.
+            self._save_checkpoint(
+                checkpoint_path,
+                "run_meta",
+                {"query": query, "date": get_today(), "model": self.model},
+            )
+
         # Step 1: Check for clarification (optional)
         status("Analyzing query...")
         needs_clarification, message = await self.clarify(query)
@@ -197,27 +228,90 @@ class DeepResearcher:
 
         # Step 2: Create research brief
         status("Creating research brief...")
-        brief = await self.create_brief(query)
-        status(f"Brief: {brief[:100]}...")
+        brief_data = (
+            self._load_checkpoint(checkpoint_path, "brief")
+            if (resume and checkpoint_path is not None)
+            else None
+        )
+        if brief_data is not None:
+            brief = str(brief_data["brief"])
+            status("Brief: (resumed from checkpoint)")
+        else:
+            brief = await self.create_brief(query)
+            if checkpoint_path is not None:
+                self._save_checkpoint(checkpoint_path, "brief", {"brief": brief})
+            status(f"Brief: {brief[:100]}...")
 
         # Step 3: Plan research
         status("Planning research strategy...")
-        topics = await self.plan_research(brief)
-        status(f"Planned {len(topics)} research task(s)")
+        topics_data = (
+            self._load_checkpoint(checkpoint_path, "topics")
+            if (resume and checkpoint_path is not None)
+            else None
+        )
+        if topics_data is not None:
+            topics = [ResearchTopic.model_validate(t) for t in topics_data["topics"]]
+            status(f"Planned {len(topics)} research task(s) (resumed)")
+        else:
+            topics = await self.plan_research(brief)
+            if checkpoint_path is not None:
+                self._save_checkpoint(
+                    checkpoint_path,
+                    "topics",
+                    {"topics": [t.model_dump() for t in topics]},
+                )
+            status(f"Planned {len(topics)} research task(s)")
 
         # Step 4: Execute research in parallel
         status("Conducting research...")
-        research_tasks = [self.research_topic(topic) for topic in topics]
-        findings = await asyncio.gather(*research_tasks)
-        status(f"Completed {len(findings)} research task(s)")
+        findings_data = (
+            self._load_checkpoint(checkpoint_path, "findings")
+            if (resume and checkpoint_path is not None)
+            else None
+        )
+        if findings_data is not None:
+            findings = [ResearchFindings.model_validate(f) for f in findings_data["findings"]]
+            status(f"Completed {len(findings)} research task(s) (resumed)")
+        else:
+            research_tasks = [self.research_topic(topic) for topic in topics]
+            findings = await asyncio.gather(*research_tasks)
+            if checkpoint_path is not None:
+                self._save_checkpoint(
+                    checkpoint_path,
+                    "findings",
+                    {"findings": [f.model_dump() for f in findings]},
+                )
+            status(f"Completed {len(findings)} research task(s)")
 
         # Step 5: Compress findings
         status("Organizing findings...")
-        compressed = await self.compress_findings(findings)
+        compressed_data = (
+            self._load_checkpoint(checkpoint_path, "compressed")
+            if (resume and checkpoint_path is not None)
+            else None
+        )
+        if compressed_data is not None:
+            compressed = str(compressed_data["compressed"])
+            status("Compressed findings: (resumed)")
+        else:
+            compressed = await self.compress_findings(findings)
+            if checkpoint_path is not None:
+                self._save_checkpoint(checkpoint_path, "compressed", {"compressed": compressed})
 
         # Step 6: Write final report
         status("Writing final report...")
-        report = await self.write_report(query, brief, compressed)
+        report_data = (
+            self._load_checkpoint(checkpoint_path, "report")
+            if (resume and checkpoint_path is not None)
+            else None
+        )
+        if report_data is not None:
+            report = str(report_data["report"])
+            status("Report: (resumed)")
+        else:
+            report = await self.write_report(query, brief, compressed)
+            if checkpoint_path is not None:
+                self._save_checkpoint(checkpoint_path, "report", {"report": report})
 
         status("Research complete!")
         return report
