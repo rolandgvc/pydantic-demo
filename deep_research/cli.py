@@ -30,12 +30,21 @@ def print_status(msg: str):
     print(f"\033[90m→ {msg}\033[0m", file=sys.stderr)
 
 
-async def run_research(query: str, model: str, parallel: int, output_file: str = None):
+async def run_research(
+    query: str,
+    model: str,
+    parallel: int,
+    output_file: str = None,
+    checkpoint_dir: str | None = None,
+    resume: bool = False,
+):
     """Run deep research."""
     researcher = DeepResearcher(
         model=model,
         max_parallel_researchers=parallel,
         allow_clarification=False,
+        checkpoint_dir=checkpoint_dir,
+        resume=resume,
     )
 
     print(f"\n{'='*60}")
@@ -78,7 +87,13 @@ async def interactive_mode(model: str, parallel: int):
                 print("Please enter a query.\n")
                 continue
 
-            await run_research(query, model, parallel)
+            await run_research(
+                query,
+                model,
+                parallel,
+                checkpoint_dir=None,
+                resume=False,
+            )
             print()
 
         except KeyboardInterrupt:
@@ -122,6 +137,15 @@ Examples:
         help='Output file for report (markdown)'
     )
     parser.add_argument(
+        '--checkpoint-dir',
+        help='Directory to write/read checkpoints (optional)'
+    )
+    parser.add_argument(
+        '--resume',
+        action='store_true',
+        help='Resume from checkpoints in --checkpoint-dir when available'
+    )
+    parser.add_argument(
         '-i', '--interactive',
         action='store_true',
         help='Run in interactive mode'
@@ -132,7 +156,16 @@ Examples:
     if args.interactive or not args.query:
         asyncio.run(interactive_mode(args.model, args.parallel))
     else:
-        asyncio.run(run_research(args.query, args.model, args.parallel, args.output))
+        asyncio.run(
+            run_research(
+                args.query,
+                args.model,
+                args.parallel,
+                args.output,
+                checkpoint_dir=args.checkpoint_dir,
+                resume=args.resume,
+            )
+        )
 
 
 if __name__ == '__main__':
