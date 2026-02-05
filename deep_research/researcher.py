@@ -60,6 +60,7 @@ class DeepResearcher:
         # Clarification agent
         self.clarifier = Agent(
             self.model,
+            name="clarifier",
             output_type=ClarificationNeeded,
             system_prompt="You help clarify research requests when needed.",
         )
@@ -67,6 +68,7 @@ class DeepResearcher:
         # Brief writer agent
         self.brief_writer = Agent(
             self.model,
+            name="brief-writer",
             output_type=ResearchBrief,
             system_prompt="You transform user queries into detailed research briefs.",
         )
@@ -74,6 +76,7 @@ class DeepResearcher:
         # Supervisor agent - plans research
         self.supervisor = Agent(
             self.model,
+            name="supervisor",
             output_type=ResearchPlan,
             system_prompt="You are a research supervisor who plans research strategies.",
         )
@@ -81,6 +84,7 @@ class DeepResearcher:
         # Researcher agent - does actual searching
         self.researcher = Agent(
             self.model,
+            name="researcher",
             tools=[duckduckgo_search_tool()],
             system_prompt="You are a research assistant who searches for information.",
         )
@@ -88,12 +92,14 @@ class DeepResearcher:
         # Compressor agent - summarizes findings
         self.compressor = Agent(
             self.model,
+            name="compressor",
             system_prompt="You compress and organize research findings.",
         )
 
         # Report writer agent
         self.report_writer = Agent(
             self.model,
+            name="report-writer",
             system_prompt="You write comprehensive research reports.",
         )
 
