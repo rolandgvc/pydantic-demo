@@ -15,12 +15,18 @@ from .models import (
     ResearchTopic,
 )
 from .prompts import (
-    CLARIFICATION_PROMPT,
-    COMPRESS_PROMPT,
-    FINAL_REPORT_PROMPT,
-    RESEARCHER_PROMPT,
-    RESEARCH_BRIEF_PROMPT,
-    SUPERVISOR_PROMPT,
+    CLARIFIER_SYSTEM_PROMPT,
+    CLARIFIER_USER_PROMPT,
+    COMPRESS_SYSTEM_PROMPT,
+    COMPRESS_USER_PROMPT,
+    FINAL_REPORT_SYSTEM_PROMPT,
+    FINAL_REPORT_USER_PROMPT,
+    RESEARCHER_SYSTEM_PROMPT,
+    RESEARCHER_USER_PROMPT,
+    RESEARCH_BRIEF_SYSTEM_PROMPT,
+    RESEARCH_BRIEF_USER_PROMPT,
+    SUPERVISOR_SYSTEM_PROMPT,
+    SUPERVISOR_USER_PROMPT,
     get_today,
 )
 
@@ -82,7 +88,7 @@ class DeepResearcher:
         self.researcher = Agent(
             self.model,
             tools=[duckduckgo_search_tool()],
-            system_prompt="You are a research assistant who searches for information.",
+            system_prompt=RESEARCHER_SYSTEM_PROMPT,
         )
 
         # Compressor agent - summarizes findings
@@ -107,7 +113,7 @@ class DeepResearcher:
         if not self.allow_clarification:
             return False, ""
 
-        prompt = CLARIFICATION_PROMPT.format(query=query, date=get_today())
+        prompt = CLARIFIER_USER_PROMPT.format(query=query, date=get_today())
         result = await self.clarifier.run(prompt)
 
         if result.output.need_clarification:
@@ -117,14 +123,14 @@ class DeepResearcher:
     @logfire.instrument('Create research brief')
     async def create_brief(self, query: str) -> str:
         """Transform query into research brief."""
-        prompt = RESEARCH_BRIEF_PROMPT.format(query=query, date=get_today())
+        prompt = RESEARCH_BRIEF_USER_PROMPT.format(query=query, date=get_today())
         result = await self.brief_writer.run(prompt)
         return result.output.brief
 
     @logfire.instrument('Plan research')
     async def plan_research(self, brief: str) -> list[ResearchTopic]:
         """Plan research by breaking into subtopics."""
-        prompt = SUPERVISOR_PROMPT.format(brief=brief, date=get_today())
+        prompt = SUPERVISOR_USER_PROMPT.format(brief=brief, date=get_today())
         result = await self.supervisor.run(prompt)
 
         # Limit to max parallel researchers
@@ -134,7 +140,7 @@ class DeepResearcher:
     @logfire.instrument('Research topic: {topic.topic}')
     async def research_topic(self, topic: ResearchTopic) -> ResearchFindings:
         """Research a single topic."""
-        prompt = RESEARCHER_PROMPT.format(topic=topic.topic, date=get_today())
+        prompt = RESEARCHER_USER_PROMPT.format(topic=topic.topic, date=get_today())
         result = await self.researcher.run(prompt)
 
         # Extract findings from conversation
@@ -154,18 +160,18 @@ class DeepResearcher:
             for f in findings
         ])
 
-        prompt = COMPRESS_PROMPT.format(findings=all_findings, date=get_today())
+        prompt = COMPRESS_USER_PROMPT.format(findings=all_findings, date=get_today())
         result = await self.compressor.run(prompt)
         return result.output if isinstance(result.output, str) else str(result.output)
 
     @logfire.instrument('Write final report')
     async def write_report(self, query: str, brief: str, findings: str) -> str:
         """Write final comprehensive report."""
-        prompt = FINAL_REPORT_PROMPT.format(
+        prompt = FINAL_REPORT_USER_PROMPT.format(
             query=query,
             brief=brief,
             findings=findings,
-            date=get_today()
+            date=get_today(),
         )
         result = await self.report_writer.run(prompt)
         return result.output if isinstance(result.output, str) else str(result.output)
