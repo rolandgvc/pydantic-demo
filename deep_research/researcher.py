@@ -1,5 +1,6 @@
 """Deep research implementation using Pydantic AI."""
 import asyncio
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -36,6 +37,37 @@ class ResearchContext:
         if self.findings is None:
             self.findings = []
 
+
+
+
+class StepValidationError(RuntimeError):
+    """Raised when a workflow step violates an expected contract."""
+
+    def __init__(self, step: str, message: str):
+        super().__init__(f"{step}: {message}")
+        self.step = step
+        self.message = message
+
+
+_URL_RE = re.compile(r"https?://[^\s)\]}>\"']+")
+
+
+def extract_urls(text: str) -> list[str]:
+    """Best-effort URL extraction for simple source gating.
+
+    This is intentionally lightweight: the system currently asks for inline citations,
+    but later steps need *some* deterministic signal that sources exist.
+    """
+
+    urls = _URL_RE.findall(text or "")
+    # Normalize and de-duplicate while preserving order
+    seen: set[str] = set()
+    out: list[str] = []
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
 
 class DeepResearcher:
     """Deep research agent using Pydantic AI."""
@@ -139,11 +171,20 @@ class DeepResearcher:
 
         # Extract findings from conversation
         findings = result.output if isinstance(result.output, str) else str(result.output)
+        sources = extract_urls(findings)
+
+        if not findings.strip():
+            raise StepValidationError("research_topic", f"Empty findings for topic: {topic.topic!r}")
+        if not sources:
+            raise StepValidationError(
+                "research_topic",
+                f"No source URLs detected in findings for topic: {topic.topic!r}",
+            )
 
         return ResearchFindings(
             topic=topic.topic,
             findings=findings,
-            sources=[]  # Sources are inline in the findings
+            sources=sources,
         )
 
     @logfire.instrument('Compress findings')
@@ -164,6 +205,7 @@ class DeepResearcher:
         prompt = FINAL_REPORT_PROMPT.format(
             query=query,
             brief=brief,
+
             findings=findings,
             date=get_today()
         )
@@ -206,18 +248,48 @@ class DeepResearcher:
         status(f"Planned {len(topics)} research task(s)")
 
         # Step 4: Execute research in parallel
+
+        if not topics:
+            raise StepValidationError("plan_research", "Supervisor returned no topics")
+        if any(not t.topic.strip() for t in topics):
+            raise StepValidationError("plan_research", "One or more planned topics were empty")
+
         status("Conducting research...")
         research_tasks = [self.research_topic(topic) for topic in topics]
         findings = await asyncio.gather(*research_tasks)
         status(f"Completed {len(findings)} research task(s)")
+
+
 
         # Step 5: Compress findings
         status("Organizing findings...")
         compressed = await self.compress_findings(findings)
 
         # Step 6: Write final report
+
+        if not extract_urls(compressed):
+            raise StepValidationError(
+                "compress_findings",
+                "No source URLs detected in compressed findings; cannot produce a grounded report",
+            )
+
         status("Writing final report...")
         report = await self.write_report(query, brief, compressed)
 
+
+        if not report.strip():
+            raise StepValidationError("write_report", "Final report was empty")
+        if not extract_urls(report):
+            raise StepValidationError(
+                "write_report",
+                "No source URLs detected in final report; expected a Sources section with links",
+            )
+
         status("Research complete!")
+
+
+
+
+
+
         return report
