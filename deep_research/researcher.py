@@ -1,11 +1,13 @@
 """Deep research implementation using Pydantic AI."""
 import asyncio
+import re
 from dataclasses import dataclass
 from typing import Any
 
 import logfire
 from pydantic_ai import Agent
 from pydantic_ai.common_tools.duckduckgo import duckduckgo_search_tool
+from pydantic_ai.usage import UsageLimits
 
 from .models import (
     ClarificationNeeded,
@@ -135,24 +137,37 @@ class DeepResearcher:
     async def research_topic(self, topic: ResearchTopic) -> ResearchFindings:
         """Research a single topic."""
         prompt = RESEARCHER_PROMPT.format(topic=topic.topic, date=get_today())
-        result = await self.researcher.run(prompt)
+
+        # Bound total model/tool requests within a single topic investigation.
+        # Note: in PydanticAI, tool calls count toward the overall request limit.
+        result = await self.researcher.run(
+            prompt,
+            usage_limits=UsageLimits(request_limit=self.max_search_iterations),
+        )
 
         # Extract findings from conversation
         findings = result.output if isinstance(result.output, str) else str(result.output)
 
+        # Best-effort extraction of URLs so downstream steps can retain a sources list.
+        urls = re.findall(r"https?://[^\s)\]]+", findings)
+        sources = sorted({u.rstrip(".,;") for u in urls})
+
         return ResearchFindings(
             topic=topic.topic,
             findings=findings,
-            sources=[]  # Sources are inline in the findings
+            sources=sources,
         )
 
     @logfire.instrument('Compress findings')
     async def compress_findings(self, findings: list[ResearchFindings]) -> str:
         """Compress multiple findings into organized summary."""
-        all_findings = "\n\n---\n\n".join([
-            f"## {f.topic}\n\n{f.findings}"
-            for f in findings
-        ])
+        all_findings = "\n\n---\n\n".join(
+            [
+                f"## {f.topic}\n\n{f.findings}\n\nSources:\n"
+                + "\n".join(f"- {s}" for s in (f.sources or []))
+                for f in findings
+            ]
+        )
 
         prompt = COMPRESS_PROMPT.format(findings=all_findings, date=get_today())
         result = await self.compressor.run(prompt)
