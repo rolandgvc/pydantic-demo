@@ -198,26 +198,55 @@ class DeepResearcher:
         # Step 2: Create research brief
         status("Creating research brief...")
         brief = await self.create_brief(query)
+        brief = (brief or "").strip()
+        if not brief:
+            raise ValueError('Brief writer returned an empty brief')
         status(f"Brief: {brief[:100]}...")
 
         # Step 3: Plan research
         status("Planning research strategy...")
         topics = await self.plan_research(brief)
+        if not topics:
+            raise ValueError('Supervisor returned no research topics')
         status(f"Planned {len(topics)} research task(s)")
 
         # Step 4: Execute research in parallel
         status("Conducting research...")
         research_tasks = [self.research_topic(topic) for topic in topics]
-        findings = await asyncio.gather(*research_tasks)
-        status(f"Completed {len(findings)} research task(s)")
+        results = await asyncio.gather(*research_tasks, return_exceptions=True)
+
+        findings: list[ResearchFindings] = []
+        errors: list[BaseException] = []
+        for result in results:
+            if isinstance(result, BaseException):
+                errors.append(result)
+            else:
+                findings.append(result)
+
+        if errors and not findings:
+            # Nothing useful to continue with
+            raise RuntimeError(
+                f"All research subtasks failed ({len(errors)} error(s)). First error: {errors[0]!r}"
+            )
+
+        if errors:
+            status(f"Completed {len(findings)} research task(s) with {len(errors)} error(s)")
+        else:
+            status(f"Completed {len(findings)} research task(s)")
 
         # Step 5: Compress findings
         status("Organizing findings...")
         compressed = await self.compress_findings(findings)
+        compressed = (compressed or "").strip()
+        if not compressed:
+            raise ValueError('Compressor returned empty compressed findings')
 
         # Step 6: Write final report
         status("Writing final report...")
         report = await self.write_report(query, brief, compressed)
+        report = (report or "").strip()
+        if not report:
+            raise ValueError('Report writer returned an empty report')
 
         status("Research complete!")
         return report
