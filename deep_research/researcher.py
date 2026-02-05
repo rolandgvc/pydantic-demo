@@ -37,6 +37,16 @@ class ResearchContext:
             self.findings = []
 
 
+
+
+class DeepResearchError(RuntimeError):
+    """Raised when the deep research workflow fails a step contract."""
+
+    def __init__(self, step: str, message: str):
+        super().__init__(f"{step}: {message}")
+        self.step = step
+        self.message = message
+
 class DeepResearcher:
     """Deep research agent using Pydantic AI."""
 
@@ -96,6 +106,16 @@ class DeepResearcher:
             self.model,
             system_prompt="You write comprehensive research reports.",
         )
+
+
+    def _require(self, step: str, condition: bool, message: str) -> None:
+        if not condition:
+            raise DeepResearchError(step=step, message=message)
+
+    def _require_non_empty_str(self, step: str, value: Any, name: str) -> str:
+        value_str = value if isinstance(value, str) else str(value)
+        self._require(step, bool(value_str.strip()), f"{name} must be a non-empty string")
+        return value_str
 
     @logfire.instrument('Clarify query')
     async def clarify(self, query: str) -> tuple[bool, str]:
@@ -197,27 +217,52 @@ class DeepResearcher:
 
         # Step 2: Create research brief
         status("Creating research brief...")
-        brief = await self.create_brief(query)
+        brief = self._require_non_empty_str("brief", await self.create_brief(query), "brief")
         status(f"Brief: {brief[:100]}...")
 
         # Step 3: Plan research
         status("Planning research strategy...")
         topics = await self.plan_research(brief)
+        self._require("plan", len(topics) > 0, "supervisor returned 0 research topics")
+        self._require(
+            "plan",
+            all(t.topic and t.topic.strip() for t in topics),
+            "one or more research topics were empty",
+        )
         status(f"Planned {len(topics)} research task(s)")
 
         # Step 4: Execute research in parallel
         status("Conducting research...")
         research_tasks = [self.research_topic(topic) for topic in topics]
         findings = await asyncio.gather(*research_tasks)
+        self._require(
+            "research",
+            len(findings) == len(topics),
+            "missing findings for one or more planned topics",
+        )
+        self._require(
+            "research",
+            all(f.findings and f.findings.strip() for f in findings),
+            "one or more researcher runs returned empty findings",
+        )
         status(f"Completed {len(findings)} research task(s)")
 
         # Step 5: Compress findings
         status("Organizing findings...")
-        compressed = await self.compress_findings(findings)
+        compressed = self._require_non_empty_str(
+            "compress", await self.compress_findings(findings), "compressed findings"
+        )
 
         # Step 6: Write final report
         status("Writing final report...")
-        report = await self.write_report(query, brief, compressed)
+        report = self._require_non_empty_str(
+            "report", await self.write_report(query, brief, compressed), "final report"
+        )
+        self._require(
+            "report",
+            "sources" in report.lower(),
+            "final report is missing a 'Sources' section",
+        )
 
         status("Research complete!")
         return report
