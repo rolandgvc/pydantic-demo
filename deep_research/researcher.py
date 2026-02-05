@@ -79,10 +79,12 @@ class DeepResearcher:
         )
 
         # Researcher agent - does actual searching
+        # Use a structured output so we can reliably render citations/sources downstream.
         self.researcher = Agent(
             self.model,
+            output_type=ResearchFindings,
             tools=[duckduckgo_search_tool()],
-            system_prompt="You are a research assistant who searches for information.",
+            system_prompt="You are a research assistant who searches for information and returns structured findings with sources.",
         )
 
         # Compressor agent - summarizes findings
@@ -137,14 +139,16 @@ class DeepResearcher:
         prompt = RESEARCHER_PROMPT.format(topic=topic.topic, date=get_today())
         result = await self.researcher.run(prompt)
 
-        # Extract findings from conversation
-        findings = result.output if isinstance(result.output, str) else str(result.output)
+        output = result.output
+        if not isinstance(output, ResearchFindings):
+            # Defensive fallback if the provider returns non-validated output.
+            return ResearchFindings(topic=topic.topic, findings=str(output))
 
-        return ResearchFindings(
-            topic=topic.topic,
-            findings=findings,
-            sources=[]  # Sources are inline in the findings
-        )
+        # Ensure topic is preserved (supervisor topic string is the contract).
+        if output.topic.strip() != topic.topic.strip():
+            output.topic = topic.topic
+
+        return output
 
     @logfire.instrument('Compress findings')
     async def compress_findings(self, findings: list[ResearchFindings]) -> str:

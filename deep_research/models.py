@@ -1,7 +1,6 @@
 """Data models for deep research."""
-from typing import Annotated
+
 from pydantic import BaseModel, Field
-from annotated_types import Ge, Le
 
 
 class ResearchTopic(BaseModel):
@@ -11,9 +10,10 @@ class ResearchTopic(BaseModel):
 
 class ResearchFindings(BaseModel):
     """Findings from a research task."""
+
     topic: str
     findings: str
-    sources: list[str] = []
+    sources: list[str] = Field(default_factory=list)
 
 
 class ResearchPlan(BaseModel):
