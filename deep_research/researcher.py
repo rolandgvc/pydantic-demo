@@ -189,35 +189,77 @@ class DeepResearcher:
             if on_status:
                 on_status(msg)
 
+        def _require(condition: bool, message: str) -> None:
+            if not condition:
+                raise ValueError(message)
+
         # Step 1: Check for clarification (optional)
-        status("Analyzing query...")
-        needs_clarification, message = await self.clarify(query)
+        try:
+            status("Analyzing query...")
+            needs_clarification, message = await self.clarify(query)
+        except Exception as e:  # pragma: no cover
+            raise RuntimeError(f"Step failed: clarify ({e})") from e
+
         if needs_clarification:
             return f"Clarification needed: {message}"
 
         # Step 2: Create research brief
-        status("Creating research brief...")
-        brief = await self.create_brief(query)
-        status(f"Brief: {brief[:100]}...")
+        try:
+            status("Creating research brief...")
+            brief = await self.create_brief(query)
+            _require(bool(brief and brief.strip()), 'Brief creation returned empty output')
+            status(f"Brief: {brief[:100]}...")
+        except Exception as e:
+            raise RuntimeError(f"Step failed: create_brief ({e})") from e
 
         # Step 3: Plan research
-        status("Planning research strategy...")
-        topics = await self.plan_research(brief)
-        status(f"Planned {len(topics)} research task(s)")
+        try:
+            status("Planning research strategy...")
+            topics = await self.plan_research(brief)
+            _require(bool(topics), 'Research planning returned no topics')
+            _require(all(bool(t.topic and t.topic.strip()) for t in topics), 'One or more topics were empty')
+            status(f"Planned {len(topics)} research task(s)")
+        except Exception as e:
+            raise RuntimeError(f"Step failed: plan_research ({e})") from e
 
         # Step 4: Execute research in parallel
         status("Conducting research...")
         research_tasks = [self.research_topic(topic) for topic in topics]
-        findings = await asyncio.gather(*research_tasks)
+        results = await asyncio.gather(*research_tasks, return_exceptions=True)
+
+        findings: list[ResearchFindings] = []
+        failures: list[str] = []
+        for topic, r in zip(topics, results, strict=False):
+            if isinstance(r, Exception):
+                failures.append(f"{topic.topic}: {r}")
+            else:
+                if not r.findings.strip():
+                    failures.append(f"{topic.topic}: empty findings")
+                else:
+                    findings.append(r)
+
+        if failures and not findings:
+            raise RuntimeError('Step failed: research_topic (all topics failed)')
+        if failures:
+            status(f"Warning: {len(failures)} topic(s) failed")
+
         status(f"Completed {len(findings)} research task(s)")
 
         # Step 5: Compress findings
-        status("Organizing findings...")
-        compressed = await self.compress_findings(findings)
+        try:
+            status("Organizing findings...")
+            compressed = await self.compress_findings(findings)
+            _require(bool(compressed and compressed.strip()), 'Compression returned empty output')
+        except Exception as e:
+            raise RuntimeError(f"Step failed: compress_findings ({e})") from e
 
         # Step 6: Write final report
-        status("Writing final report...")
-        report = await self.write_report(query, brief, compressed)
+        try:
+            status("Writing final report...")
+            report = await self.write_report(query, brief, compressed)
+            _require(bool(report and report.strip()), 'Report generation returned empty output')
+        except Exception as e:
+            raise RuntimeError(f"Step failed: write_report ({e})") from e
 
         status("Research complete!")
         return report
