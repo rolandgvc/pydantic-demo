@@ -12,6 +12,7 @@ from .models import (
     ResearchBrief,
     ResearchFindings,
     ResearchPlan,
+    ResearcherOutput,
     ResearchTopic,
 )
 from .prompts import (
@@ -81,8 +82,9 @@ class DeepResearcher:
         # Researcher agent - does actual searching
         self.researcher = Agent(
             self.model,
+            output_type=ResearcherOutput,
             tools=[duckduckgo_search_tool()],
-            system_prompt="You are a research assistant who searches for information.",
+            system_prompt="You are a research assistant who searches for information and returns structured findings with sources.",
         )
 
         # Compressor agent - summarizes findings
@@ -137,22 +139,23 @@ class DeepResearcher:
         prompt = RESEARCHER_PROMPT.format(topic=topic.topic, date=get_today())
         result = await self.researcher.run(prompt)
 
-        # Extract findings from conversation
-        findings = result.output if isinstance(result.output, str) else str(result.output)
-
         return ResearchFindings(
             topic=topic.topic,
-            findings=findings,
-            sources=[]  # Sources are inline in the findings
+            findings=result.output.findings,
+            sources=result.output.sources,
         )
 
     @logfire.instrument('Compress findings')
     async def compress_findings(self, findings: list[ResearchFindings]) -> str:
         """Compress multiple findings into organized summary."""
-        all_findings = "\n\n---\n\n".join([
-            f"## {f.topic}\n\n{f.findings}"
-            for f in findings
-        ])
+        rendered: list[str] = []
+        for f in findings:
+            sources_md = "\n".join([f"- {s.title}: {s.url}" for s in f.sources])
+            rendered.append(
+                f"## {f.topic}\n\n{f.findings}\n\n### Sources\n{sources_md if sources_md else '- (none)'}"
+            )
+
+        all_findings = "\n\n---\n\n".join(rendered)
 
         prompt = COMPRESS_PROMPT.format(findings=all_findings, date=get_today())
         result = await self.compressor.run(prompt)
