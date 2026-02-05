@@ -1,6 +1,8 @@
 """Deep research implementation using Pydantic AI."""
 import asyncio
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import logfire
@@ -23,6 +25,26 @@ from .prompts import (
     SUPERVISOR_PROMPT,
     get_today,
 )
+
+
+def _safe_filename(name: str) -> str:
+    return "".join(c if c.isalnum() or c in ("-", "_", ".") else "_" for c in name)
+
+
+def _write_text(path: Path, text: str) -> None:
+    path.write_text(text, encoding="utf-8")
+
+
+def _read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def _write_json(path: Path, data: Any) -> None:
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _read_json(path: Path) -> Any:
+    return json.loads(_read_text(path))
 
 
 @dataclass
@@ -175,49 +197,106 @@ class DeepResearcher:
         self,
         query: str,
         on_status: callable = None,
+        *,
+        run_dir: str | Path | None = None,
+        resume: bool = False,
     ) -> str:
         """Conduct deep research on a query.
 
+        If `run_dir` is provided, intermediate artifacts are checkpointed so that
+        long runs can be resumed after failures.
+
         Args:
-            query: The research query
-            on_status: Optional callback for status updates
+            query: The research query.
+            on_status: Optional callback for status updates.
+            run_dir: Directory to store intermediate artifacts.
+            resume: If True, reuse existing artifacts from `run_dir` when present.
 
         Returns:
-            Final research report as string
+            Final research report as string.
         """
+
         def status(msg: str):
             if on_status:
                 on_status(msg)
 
+        run_path: Path | None = None
+        if run_dir is not None:
+            run_path = Path(run_dir)
+            run_path.mkdir(parents=True, exist_ok=True)
+
+        def artifact(name: str) -> Path | None:
+            if run_path is None:
+                return None
+            return run_path / name
+
+        brief_path = artifact('brief.txt')
+        topics_path = artifact('topics.json')
+        findings_path = artifact('findings.json')
+        compressed_path = artifact('compressed.md')
+        report_path = artifact('report.md')
+
         # Step 1: Check for clarification (optional)
-        status("Analyzing query...")
+        status('Analyzing query...')
         needs_clarification, message = await self.clarify(query)
         if needs_clarification:
-            return f"Clarification needed: {message}"
+            return f'Clarification needed: {message}'
 
         # Step 2: Create research brief
-        status("Creating research brief...")
-        brief = await self.create_brief(query)
-        status(f"Brief: {brief[:100]}...")
+        if resume and brief_path and brief_path.exists():
+            status('Loading research brief from checkpoint...')
+            brief = _read_text(brief_path)
+        else:
+            status('Creating research brief...')
+            brief = await self.create_brief(query)
+            if brief_path:
+                _write_text(brief_path, brief)
+        status(f'Brief: {brief[:100]}...')
 
         # Step 3: Plan research
-        status("Planning research strategy...")
-        topics = await self.plan_research(brief)
-        status(f"Planned {len(topics)} research task(s)")
+        if resume and topics_path and topics_path.exists():
+            status('Loading research plan from checkpoint...')
+            topics_data = _read_json(topics_path)
+            topics = [ResearchTopic.model_validate(t) for t in topics_data]
+        else:
+            status('Planning research strategy...')
+            topics = await self.plan_research(brief)
+            if topics_path:
+                _write_json(topics_path, [t.model_dump() for t in topics])
+        status(f'Planned {len(topics)} research task(s)')
 
         # Step 4: Execute research in parallel
-        status("Conducting research...")
-        research_tasks = [self.research_topic(topic) for topic in topics]
-        findings = await asyncio.gather(*research_tasks)
-        status(f"Completed {len(findings)} research task(s)")
+        if resume and findings_path and findings_path.exists():
+            status('Loading research findings from checkpoint...')
+            findings_data = _read_json(findings_path)
+            findings = [ResearchFindings.model_validate(f) for f in findings_data]
+        else:
+            status('Conducting research...')
+            research_tasks = [self.research_topic(topic) for topic in topics]
+            findings = await asyncio.gather(*research_tasks)
+            if findings_path:
+                _write_json(findings_path, [f.model_dump() for f in findings])
+        status(f'Completed {len(findings)} research task(s)')
 
         # Step 5: Compress findings
-        status("Organizing findings...")
-        compressed = await self.compress_findings(findings)
+        if resume and compressed_path and compressed_path.exists():
+            status('Loading compressed findings from checkpoint...')
+            compressed = _read_text(compressed_path)
+        else:
+            status('Organizing findings...')
+            compressed = await self.compress_findings(findings)
+            if compressed_path:
+                _write_text(compressed_path, compressed)
 
         # Step 6: Write final report
-        status("Writing final report...")
-        report = await self.write_report(query, brief, compressed)
+        if resume and report_path and report_path.exists():
+            status('Loading final report from checkpoint...')
+            report = _read_text(report_path)
+        else:
+            status('Writing final report...')
+            report = await self.write_report(query, brief, compressed)
+            if report_path:
+                _write_text(report_path, report)
 
-        status("Research complete!")
+        status('Research complete!')
         return report
