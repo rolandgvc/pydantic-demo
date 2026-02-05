@@ -14,12 +14,19 @@ load_dotenv(Path(__file__).parent.parent / '.env', override=True)
 import warnings
 warnings.filterwarnings('ignore', message='Logfire')
 
-# Configure logfire
+# Configure logfire (+ Introspection export)
 try:
     import logfire
-    logfire.configure(service_name='deep-research')
+    from introspection_sdk import IntrospectionSpanProcessor
+
+    processor = IntrospectionSpanProcessor(service_name='deep-research')
+    logfire.configure(
+        service_name='deep-research',
+        additional_span_processors=[processor],
+    )
     logfire.instrument_pydantic_ai()
 except Exception:
+    # Keep CLI usable even when observability deps/config are missing
     pass
 
 from .researcher import DeepResearcher
