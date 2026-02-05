@@ -1,5 +1,6 @@
 """Deep research implementation using Pydantic AI."""
 import asyncio
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,6 +24,53 @@ from .prompts import (
     SUPERVISOR_PROMPT,
     get_today,
 )
+
+
+class StageValidationError(RuntimeError):
+    """Raised when an intermediate pipeline stage fails deterministic validation."""
+
+    def __init__(self, stage: str, message: str):
+        super().__init__(f"{stage}: {message}")
+        self.stage = stage
+        self.message = message
+
+
+_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+
+
+def _require(condition: bool, stage: str, message: str) -> None:
+    if not condition:
+        raise StageValidationError(stage, message)
+
+
+def validate_brief(brief: str) -> None:
+    stage = "brief"
+    _require(isinstance(brief, str) and brief.strip(), stage, "Brief is empty")
+    _require(len(brief.strip()) >= 200, stage, "Brief is too short to guide research")
+
+
+def validate_topics(topics: list[ResearchTopic]) -> None:
+    stage = "plan"
+    _require(len(topics) >= 1, stage, "No research topics were planned")
+    normalized = [t.topic.strip().lower() for t in topics if t.topic.strip()]
+    _require(len(normalized) == len(topics), stage, "One or more planned topics are empty")
+    _require(len(set(normalized)) == len(normalized), stage, "Planned topics are not distinct")
+    for t in topics:
+        _require(len(t.topic.strip()) >= 80, stage, "A planned topic is too short / not actionable")
+
+
+def validate_findings(findings: list[ResearchFindings]) -> None:
+    stage = "research"
+    _require(len(findings) >= 1, stage, "No findings were produced")
+    for f in findings:
+        _require(f.findings.strip(), stage, f"Findings empty for topic '{f.topic}'")
+        _require(_URL_RE.search(f.findings) is not None, stage, f"No URL-like source found in findings for topic '{f.topic}'")
+
+
+def validate_compressed(compressed: str) -> None:
+    stage = "compress"
+    _require(isinstance(compressed, str) and compressed.strip(), stage, "Compressed summary is empty")
+    _require("sources" in compressed.lower(), stage, "Compressed summary is missing a Sources section")
 
 
 @dataclass
@@ -198,22 +246,26 @@ class DeepResearcher:
         # Step 2: Create research brief
         status("Creating research brief...")
         brief = await self.create_brief(query)
+        validate_brief(brief)
         status(f"Brief: {brief[:100]}...")
 
         # Step 3: Plan research
         status("Planning research strategy...")
         topics = await self.plan_research(brief)
+        validate_topics(topics)
         status(f"Planned {len(topics)} research task(s)")
 
         # Step 4: Execute research in parallel
         status("Conducting research...")
         research_tasks = [self.research_topic(topic) for topic in topics]
         findings = await asyncio.gather(*research_tasks)
+        validate_findings(findings)
         status(f"Completed {len(findings)} research task(s)")
 
         # Step 5: Compress findings
         status("Organizing findings...")
         compressed = await self.compress_findings(findings)
+        validate_compressed(compressed)
 
         # Step 6: Write final report
         status("Writing final report...")

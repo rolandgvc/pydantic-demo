@@ -22,7 +22,7 @@ try:
 except Exception:
     pass
 
-from .researcher import DeepResearcher
+from .researcher import DeepResearcher, StageValidationError
 
 
 def print_status(msg: str):
@@ -43,7 +43,11 @@ async def run_research(query: str, model: str, parallel: int, output_file: str =
     print(f"{'='*60}")
     print(f"\nQuery: {query}\n")
 
-    report = await researcher.research(query, on_status=print_status)
+    try:
+        report = await researcher.research(query, on_status=print_status)
+    except StageValidationError as e:
+        print(f"\n\033[91mValidation failed\033[0m in stage '{e.stage}': {e.message}\n", file=sys.stderr)
+        raise
 
     print(f"\n{'='*60}")
     print(f"  REPORT")
