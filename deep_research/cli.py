@@ -14,10 +14,23 @@ load_dotenv(Path(__file__).parent.parent / '.env', override=True)
 import warnings
 warnings.filterwarnings('ignore', message='Logfire')
 
-# Configure logfire
+# Configure logfire (+ optional Introspection export)
+_introspection_processor = None
 try:
     import logfire
-    logfire.configure(service_name='deep-research')
+
+    try:
+        from introspection_sdk import IntrospectionSpanProcessor
+
+        _introspection_processor = IntrospectionSpanProcessor(service_name='deep-research')
+        logfire.configure(
+            service_name='deep-research',
+            additional_span_processors=[_introspection_processor],
+        )
+    except Exception:
+        # Introspection SDK not installed/configured; fall back to standard logfire.
+        logfire.configure(service_name='deep-research')
+
     logfire.instrument_pydantic_ai()
 except Exception:
     pass
@@ -54,6 +67,13 @@ async def run_research(query: str, model: str, parallel: int, output_file: str =
         with open(output_file, 'w') as f:
             f.write(report)
         print(f"\n\033[90mReport saved to: {output_file}\033[0m")
+
+    # Ensure spans are exported even for short-lived CLI runs.
+    try:
+        if _introspection_processor is not None:
+            _introspection_processor.force_flush()
+    except Exception:
+        pass
 
     return report
 
